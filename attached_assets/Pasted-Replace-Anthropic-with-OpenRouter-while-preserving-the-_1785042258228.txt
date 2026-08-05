@@ -1,0 +1,229 @@
+Replace Anthropic with OpenRouter while preserving the original VerifAI architecture.
+
+IMPORTANT:
+Do NOT refactor the project.
+Do NOT migrate frameworks.
+Do NOT modify the frontend.
+Do NOT change FastAPI.
+Do NOT change LangGraph.
+Do NOT change the five-agent workflow.
+Do NOT rename files unless absolutely necessary.
+Do NOT change API routes or response schemas.
+Do NOT modify prompts unless required for compatibility.
+
+The goal is ONLY to replace the LLM provider.
+
+====================================================
+Current Architecture (Must Remain Unchanged)
+====================================================
+
+Backend:
+- FastAPI
+- LangGraph
+- ResearchState
+- JobStore
+
+Frontend:
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+
+Workflow:
+
+Planner
+↓
+
+Research
+↓
+
+Verification
+↓
+
+Contradiction
+↓
+
+Report
+
+This workflow must remain exactly the same.
+
+====================================================
+Migration Goal
+====================================================
+
+Replace:
+
+Anthropic API
+
+with
+
+OpenRouter API
+
+using an OpenAI-compatible client.
+
+====================================================
+Environment Variables
+====================================================
+
+Remove dependency on:
+
+ANTHROPIC_API_KEY
+
+Add:
+
+OPENROUTER_API_KEY
+
+LLM_PROVIDER=openrouter
+
+LLM_MODEL=<chosen_free_model>
+
+Example:
+
+OPENROUTER_API_KEY=xxxxxxxx
+
+LLM_PROVIDER=openrouter
+
+LLM_MODEL=nvidia/llama-3.1-nemotron-ultra-253b-v1:free
+
+Read these values from config.py.
+
+====================================================
+Client Layer
+====================================================
+
+Replace only the LLM client implementation.
+
+If there is:
+
+services/anthropic_client.py
+
+Replace its implementation (or create a new openrouter_client.py and update imports) so that the public interface remains the same.
+
+The rest of the application should not know the provider has changed.
+
+====================================================
+API Calls
+====================================================
+
+Use:
+
+POST
+
+https://openrouter.ai/api/v1/chat/completions
+
+Headers:
+
+Authorization: Bearer <OPENROUTER_API_KEY>
+
+Content-Type: application/json
+
+Optional headers:
+
+HTTP-Referer
+X-Title
+
+====================================================
+Messages
+====================================================
+
+Convert existing Anthropic prompts into OpenAI-style messages.
+
+System prompt
+
+↓
+
+system message
+
+User prompt
+
+↓
+
+user message
+
+Return only the assistant text to the existing pipeline.
+
+====================================================
+Model
+====================================================
+
+Read the model from:
+
+LLM_MODEL
+
+Do NOT hardcode it.
+
+====================================================
+Error Handling
+====================================================
+
+Preserve existing retry logic.
+
+Preserve timeout handling.
+
+Preserve structured errors.
+
+Preserve logging.
+
+====================================================
+Do NOT Change
+====================================================
+
+Do NOT change:
+
+FastAPI routes
+
+ResearchState
+
+LangGraph
+
+Agent logic
+
+Planner
+
+Research
+
+Verification
+
+Contradiction
+
+Reporter
+
+Frontend
+
+API schemas
+
+JobStore
+
+Polling
+
+====================================================
+Testing
+====================================================
+
+After migration verify:
+
+Backend starts successfully.
+
+Health endpoint works.
+
+A research request reaches OpenRouter successfully.
+
+The five-agent workflow executes normally.
+
+The report endpoint returns a completed report.
+
+====================================================
+Deliverables
+====================================================
+
+Provide:
+
+1. Files modified
+
+2. Summary of changes
+
+3. Confirmation that only the provider layer changed
+
+4. Any required .env updates
+
+Do not make any unrelated improvements or architectural changes.

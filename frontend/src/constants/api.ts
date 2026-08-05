@@ -1,0 +1,4 @@
+export const API_CONSTANTS = {
+  POLL_INTERVAL: 2000,
+  MAX_RETRIES: 3,
+};

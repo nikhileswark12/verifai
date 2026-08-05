@@ -1,0 +1,340 @@
+Perform a complete VerifAI Runtime Acceptance Test.
+
+Do NOT modify any source files.
+Do NOT refactor or optimize anything.
+Your task is only to verify the current application.
+
+The repository has already been verified as the original VerifAI architecture:
+
+- Backend: FastAPI
+- LangGraph
+- Anthropic
+- Tavily
+- React + Vite + TypeScript frontend
+
+Run the application exactly as a developer would.
+
+====================================================
+1. Backend Startup
+====================================================
+
+Navigate to backend.
+
+Verify:
+
+- Dependencies installed
+- .env exists
+- Required API keys are available
+- No secrets are printed
+
+Run:
+
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+Confirm:
+
+✓ Server starts successfully
+✓ No startup exceptions
+✓ No missing imports
+✓ No configuration errors
+
+====================================================
+2. Frontend Startup
+====================================================
+
+Navigate to frontend.
+
+Run:
+
+npm install
+npm run dev
+
+Verify:
+
+✓ Frontend starts successfully
+✓ No TypeScript runtime errors
+✓ No Vite errors
+
+====================================================
+3. Health Check
+====================================================
+
+Test:
+
+GET /health
+
+Verify:
+
+- HTTP 200
+- workflow available
+- job_store available
+
+====================================================
+4. Complete API Testing
+====================================================
+
+Test all API endpoints.
+
+GET /
+
+GET /health
+
+POST /research
+
+Payload:
+
+{
+  "query":"How is climate change affecting agriculture?"
+}
+
+Verify:
+
+- HTTP 202
+- job_id returned
+
+Immediately test:
+
+GET /research/{job_id}
+
+Verify:
+
+- Job exists
+- No "Job not found"
+
+Continue polling until completion.
+
+Verify state transitions:
+
+Planner
+
+↓
+
+Research
+
+↓
+
+Verification
+
+↓
+
+Contradiction
+
+↓
+
+Report
+
+Each agent should transition:
+
+pending → running → done
+
+No skipped agents.
+
+No duplicate execution.
+
+====================================================
+5. Report Verification
+====================================================
+
+Retrieve:
+
+GET /research/{job_id}/result
+
+Verify:
+
+Successful run returns:
+
+- Executive Summary
+- Overall Assessment
+- Claims
+- Evidence
+- Confidence
+- Contradictions
+- References
+
+If AI provider fails:
+
+Verify:
+
+- HTTP 500
+- Structured error response
+- Frontend does not poll forever
+
+====================================================
+6. Frontend User Journey
+====================================================
+
+Test exactly as a user.
+
+Open:
+
+/
+
+Verify landing page.
+
+Navigate to:
+
+/research
+
+Submit a real query.
+
+Observe:
+
+- Loading state
+- Agent Timeline
+- Progress updates
+
+Verify timeline updates correctly.
+
+When complete:
+
+Navigate automatically or manually to:
+
+/report/{job_id}
+
+Verify:
+
+Executive Summary
+
+Overall Assessment
+
+Verified Claims
+
+Evidence
+
+Confidence Breakdown
+
+Contradictions
+
+References
+
+====================================================
+7. Browser Verification
+====================================================
+
+Open Developer Tools.
+
+Verify:
+
+No console errors
+
+No failed fetch
+
+No CORS errors
+
+No JavaScript exceptions
+
+No infinite polling
+
+No blank screens
+
+====================================================
+8. Failure Testing
+====================================================
+
+Simulate:
+
+- Missing Anthropic key
+- Missing Tavily key
+- Invalid request payload
+- Invalid job ID
+
+Verify:
+
+Proper HTTP status codes
+
+Structured error messages
+
+Frontend exits polling correctly
+
+No crashes
+
+====================================================
+9. Performance Verification
+====================================================
+
+Verify:
+
+Backend remains responsive
+
+Frontend remains responsive
+
+No memory leak during polling
+
+No duplicate API requests
+
+====================================================
+10. Code Quality Verification
+====================================================
+
+Search for:
+
+console.log
+
+print(
+
+debugger
+
+TODO
+
+FIXME
+
+Verify:
+
+No production debug code
+
+No hardcoded secrets
+
+====================================================
+11. Build Verification
+====================================================
+
+Backend:
+
+python -m compileall app
+
+Frontend:
+
+npm run build
+
+npm run lint
+
+All must pass.
+
+====================================================
+FINAL REPORT
+====================================================
+
+Generate:
+
+# VerifAI Runtime Acceptance Report
+
+Include:
+
+Overall Status:
+READY / FAILED
+
+Backend Verification
+
+Frontend Verification
+
+API Verification
+
+LangGraph Verification
+
+Multi-Agent Workflow Verification
+
+Report Generation Verification
+
+Error Handling Verification
+
+Browser Verification
+
+Performance Verification
+
+Security Verification
+
+Issues Found
+
+Final Recommendation
+
+Only mark the application READY if every runtime test passes successfully.
