@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 import logging
 
@@ -14,28 +14,15 @@ from app.models import (
     ResearchStatusResponse,
 )
 from app.services.job_store import JobStore
+from app.worker.tasks import execute_research_job
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def _run_workflow_task(job_id: str, job_store: JobStore) -> None:
-    state = job_store.get(job_id)
-    if not state:
-        return
-
-    try:
-        state = await execute_workflow(state)
-        job_store.update(state)
-    except Exception as e:
-        logger.error(f"Workflow task failed: {e}")
-        job_store.update(state)
-
-
 @router.post("/research", status_code=202, response_model=ResearchAcceptedResponse)
-def create_research_job(
+async def create_research_job(
     request: ResearchRequest,
-    background_tasks: BackgroundTasks,
     job_store: JobStore = Depends(get_job_store),
 ) -> ResearchAcceptedResponse:
     from app.middleware.request_id import request_id_context
@@ -52,9 +39,9 @@ def create_research_job(
     # The default job_id is generated inside ResearchState
     state.metadata["execution"]["job_id"] = state.job_id
 
-    job_store.create(state)
+    await job_store.create(state)
 
-    background_tasks.add_task(_run_workflow_task, state.job_id, job_store)
+    execute_research_job.delay(state.job_id)
 
     return ResearchAcceptedResponse(job_id=state.job_id)
 
@@ -64,10 +51,10 @@ def create_research_job(
     response_model=ResearchStatusResponse,
     responses={404: {"model": ResearchErrorResponse}},
 )
-def get_research_status(
+async def get_research_status(
     job_id: str, job_store: JobStore = Depends(get_job_store)
 ) -> ResearchStatusResponse:
-    state = job_store.get(job_id)
+    state = await job_store.get(job_id)
     if not state:
         error_response = ResearchErrorResponse(
             error=True,
@@ -91,10 +78,10 @@ def get_research_status(
         500: {"model": ResearchErrorResponse, "description": "Job failed"}
     },
 )
-def get_research_result(
+async def get_research_result(
     job_id: str, job_store: JobStore = Depends(get_job_store)
 ):
-    state = job_store.get(job_id)
+    state = await job_store.get(job_id)
     if not state:
         error_response = ResearchErrorResponse(
             error=True,

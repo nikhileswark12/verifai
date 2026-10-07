@@ -6,9 +6,9 @@ import httpx
 
 from app.config import settings
 from app.services.exceptions import ConfigurationError, JSONParseError, LLMError
+from app.providers.llm.base import LLMProvider
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
 
 def _strip_markdown_fences(text: str) -> str:
     """Remove ```json ... ``` or ``` ... ``` wrappers that some models emit."""
@@ -18,16 +18,10 @@ def _strip_markdown_fences(text: str) -> str:
         return match.group(1).strip()
     return text
 
-
-class AnthropicClient:
+class OpenRouterProvider:
     """
-    LLM client — now backed by OpenRouter (OpenAI-compatible API).
-
-    Public interface is unchanged: instantiate, then call
-    ``await client.generate_json(system_prompt, user_prompt)``.
-    The rest of the application is unaware of the provider swap.
+    OpenRouter implementation of the LLMProvider interface.
     """
-
     def __init__(self) -> None:
         if not settings.OPENROUTER_API_KEY:
             raise ConfigurationError("OPENROUTER_API_KEY is not configured.")

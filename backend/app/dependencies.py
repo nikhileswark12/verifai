@@ -1,5 +1,7 @@
-from app.services.job_store import JobStore, job_store_instance
+﻿from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.session import get_db_session
+from app.services.job_store import JobStore
 
-
-def get_job_store() -> JobStore:
-    return job_store_instance
+async def get_job_store(session: AsyncSession = Depends(get_db_session)) -> JobStore:
+    return JobStore(session)

@@ -16,7 +16,7 @@ from app.models import (
     SourceTier,
     VerificationResult,
 )
-from app.services.anthropic_client import AnthropicClient
+from app.providers.llm.base import LLMProvider
 from app.services.prompt_loader import load_prompt
 import time
 from app.core.logging import get_logger
@@ -95,109 +95,110 @@ def _build_contradiction(
     )
 
 
-async def _compare_pair(
-    res_a: VerificationResult,
-    res_b: VerificationResult,
-    system_prompt: str,
-    client: AnthropicClient,
-) -> ContradictionPair | None:
-    user_prompt = _format_pair(res_a, res_b)
-    response_json = await client.generate_json(
-        system_prompt=system_prompt, user_prompt=user_prompt
-    )
-    validated = _validate_response(response_json)
+class Contradiction:
+    def __init__(self, llm: LLMProvider):
+        self.llm = llm
 
-    if validated["contradiction"] is True:
-        return _build_contradiction(res_a, res_b, validated)
+    async def _compare_pair(
+        self,
+        res_a: VerificationResult,
+        res_b: VerificationResult,
+        system_prompt: str,
+    ) -> ContradictionPair | None:
+        user_prompt = _format_pair(res_a, res_b)
+        response_json = await self.llm.generate_json(
+            system_prompt=system_prompt, user_prompt=user_prompt
+        )
+        validated = _validate_response(response_json)
 
-    return None
+        if validated["contradiction"] is True:
+            return _build_contradiction(res_a, res_b, validated)
 
+        return None
 
-async def _compare_all(state: ResearchState) -> ResearchState:
-    old_status = state.agent_status[AgentName.CONTRADICTION].upper()
-    state.agent_status[AgentName.CONTRADICTION] = AgentStatus.RUNNING
-    state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message=f"{old_status} -> RUNNING"))
+    async def _compare_all(self, state: ResearchState) -> ResearchState:
+        old_status = state.agent_status[AgentName.CONTRADICTION].upper()
+        state.agent_status[AgentName.CONTRADICTION] = AgentStatus.RUNNING
+        state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message=f"{old_status} -> RUNNING"))
 
-    agent_name = "contradiction"
-    start_time = time.time()
-    record_agent_start(state, agent_name)
-    logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
+        agent_name = "contradiction"
+        start_time = time.time()
+        record_agent_start(state, agent_name)
+        logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
 
-    try:
-        results = state.verification_results
-        pairs = _generate_pairs(results)
+        try:
+            results = state.verification_results
+            pairs = _generate_pairs(results)
 
-        if not pairs:
+            if not pairs:
+                state.agent_status[AgentName.CONTRADICTION] = AgentStatus.DONE
+                state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message="RUNNING -> DONE"))
+                state.logs.append(
+                    AgentLog(
+                        agent=AgentName.CONTRADICTION,
+                        message="Not enough verified claims for contradiction analysis.",
+                    )
+                )
+                
+                duration = time.time() - start_time
+                record_agent_completion(state, agent_name, duration)
+                logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
+                
+                return state
+
+            system_prompt = load_prompt("contradiction")
+
+            tasks = [self._compare_pair(a, b, system_prompt) for a, b in pairs]
+            comparison_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for pair, result in zip(pairs, comparison_results):
+                if isinstance(result, Exception):
+                    if isinstance(result, (ValidationError, ValueError, TypeError, json.JSONDecodeError)):
+                        raise result
+                    
+                    state.logs.append(
+                        AgentLog(
+                            agent=AgentName.CONTRADICTION,
+                            message=f"Comparison failed between {pair[0].claim_id} and {pair[1].claim_id}: {result}",
+                        )
+                    )
+                elif result is not None:
+                    state.contradictions.append(result)
+
             state.agent_status[AgentName.CONTRADICTION] = AgentStatus.DONE
             state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message="RUNNING -> DONE"))
             state.logs.append(
                 AgentLog(
                     agent=AgentName.CONTRADICTION,
-                    message="Not enough verified claims for contradiction analysis.",
+                    message="Contradiction analysis completed successfully.",
                 )
             )
             
             duration = time.time() - start_time
             record_agent_completion(state, agent_name, duration)
             logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
-            
-            return state
 
-        client = AnthropicClient()
-        system_prompt = load_prompt("contradiction")
-
-        tasks = [_compare_pair(a, b, system_prompt, client) for a, b in pairs]
-        comparison_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for pair, result in zip(pairs, comparison_results):
-            if isinstance(result, Exception):
-                if isinstance(result, (ValidationError, ValueError, TypeError, json.JSONDecodeError)):
-                    raise result
-                
-                state.logs.append(
-                    AgentLog(
-                        agent=AgentName.CONTRADICTION,
-                        message=f"Comparison failed between {pair[0].claim_id} and {pair[1].claim_id}: {result}",
-                    )
+        except Exception as e:
+            state.agent_status[AgentName.CONTRADICTION] = AgentStatus.ERROR
+            state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message="RUNNING -> ERROR"))
+            state.error = ErrorDetail(
+                stage=AgentName.CONTRADICTION,
+                message=str(e),
+                recoverable=False,
+                retry_count=0,
+            )
+            state.logs.append(
+                AgentLog(
+                    agent=AgentName.CONTRADICTION,
+                    message=f"Contradiction fatal failure: {e}",
                 )
-            elif result is not None:
-                state.contradictions.append(result)
-
-        state.agent_status[AgentName.CONTRADICTION] = AgentStatus.DONE
-        state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message="RUNNING -> DONE"))
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.CONTRADICTION,
-                message="Contradiction analysis completed successfully.",
             )
-        )
-        
-        duration = time.time() - start_time
-        record_agent_completion(state, agent_name, duration)
-        logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
+            
+            duration = time.time() - start_time
+            logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
+            raise
 
-    except Exception as e:
-        state.agent_status[AgentName.CONTRADICTION] = AgentStatus.ERROR
-        state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message="RUNNING -> ERROR"))
-        state.error = ErrorDetail(
-            stage=AgentName.CONTRADICTION,
-            message=str(e),
-            recoverable=False,
-            retry_count=0,
-        )
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.CONTRADICTION,
-                message=f"Contradiction fatal failure: {e}",
-            )
-        )
-        
-        duration = time.time() - start_time
-        logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
-        raise
+        return state
 
-    return state
-
-
-async def run(state: ResearchState) -> ResearchState:
-    return await _compare_all(state)
+    async def run(self, state: ResearchState) -> ResearchState:
+        return await self._compare_all(state)

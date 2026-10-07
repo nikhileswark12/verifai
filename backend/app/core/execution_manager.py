@@ -9,7 +9,7 @@ from app.core.retry import should_retry
 from app.core.logging import get_logger
 logger = get_logger(__name__)
 
-async def execute_workflow(state: ResearchState) -> ResearchState:
+async def execute_workflow(state: ResearchState, job_store=None, worker_id: str = None) -> ResearchState:
     start_time = time.time()
     retry_count = 0
     
@@ -39,6 +39,9 @@ async def execute_workflow(state: ResearchState) -> ResearchState:
                     # Update in-place to ensure job_store reference sees updates
                     for key in updated_state.model_fields_set:
                         setattr(state, key, getattr(updated_state, key))
+                    
+                    if job_store:
+                        await job_store.update(state, worker_id=worker_id)
             
             state.metadata["execution"].update({
                 "completed_at": datetime.now(timezone.utc).isoformat(),

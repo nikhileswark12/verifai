@@ -15,7 +15,7 @@ from app.models import (
     SubClaim,
     VerificationResult,
 )
-from app.services.anthropic_client import AnthropicClient
+from app.providers.llm.base import LLMProvider
 from app.services.prompt_loader import load_prompt
 import time
 from app.core.logging import get_logger
@@ -91,106 +91,107 @@ def _build_verification(
     )
 
 
-async def _verify_claim(
-    claim: SubClaim,
-    evidence_list: List[Evidence],
-    system_prompt: str,
-    client: AnthropicClient,
-) -> VerificationResult:
-    user_prompt = _format_evidence(claim, evidence_list)
-    response_json = await client.generate_json(
-        system_prompt=system_prompt, user_prompt=user_prompt
-    )
-    validated = _validate_response(response_json)
-    return _build_verification(claim.id, evidence_list, validated)
+class Verifier:
+    def __init__(self, llm: LLMProvider):
+        self.llm = llm
 
+    async def _verify_claim(
+        self,
+        claim: SubClaim,
+        evidence_list: List[Evidence],
+        system_prompt: str,
+    ) -> VerificationResult:
+        user_prompt = _format_evidence(claim, evidence_list)
+        response_json = await self.llm.generate_json(
+            system_prompt=system_prompt, user_prompt=user_prompt
+        )
+        validated = _validate_response(response_json)
+        return _build_verification(claim.id, evidence_list, validated)
 
-async def _verify_all(state: ResearchState) -> ResearchState:
-    old_status = state.agent_status[AgentName.VERIFICATION].upper()
-    state.agent_status[AgentName.VERIFICATION] = AgentStatus.RUNNING
-    state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message=f"{old_status} -> RUNNING"))
+    async def _verify_all(self, state: ResearchState) -> ResearchState:
+        old_status = state.agent_status[AgentName.VERIFICATION].upper()
+        state.agent_status[AgentName.VERIFICATION] = AgentStatus.RUNNING
+        state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message=f"{old_status} -> RUNNING"))
 
-    agent_name = "verification"
-    start_time = time.time()
-    record_agent_start(state, agent_name)
-    logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
+        agent_name = "verification"
+        start_time = time.time()
+        record_agent_start(state, agent_name)
+        logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
 
-    try:
-        client = AnthropicClient()
-        system_prompt = load_prompt("verifier")
+        try:
+            system_prompt = load_prompt("verifier")
 
-        claims = state.sub_claims
-        if not claims:
+            claims = state.sub_claims
+            if not claims:
+                state.agent_status[AgentName.VERIFICATION] = AgentStatus.DONE
+                state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message="RUNNING -> DONE"))
+                state.logs.append(
+                    AgentLog(
+                        agent=AgentName.VERIFICATION, message="No claims to verify."
+                    )
+                )
+                
+                duration = time.time() - start_time
+                record_agent_completion(state, agent_name, duration)
+                logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
+                
+                return state
+
+            tasks = []
+            for claim in claims:
+                evidence_list = state.evidence_by_claim.get(claim.id, [])
+                tasks.append(self._verify_claim(claim, evidence_list, system_prompt))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for claim, result in zip(claims, results):
+                if isinstance(result, Exception):
+                    if isinstance(result, (ValidationError, ValueError, TypeError, json.JSONDecodeError)):
+                        raise result
+                    
+                    state.logs.append(
+                        AgentLog(
+                            agent=AgentName.VERIFICATION,
+                            message=f"Verification failed for claim '{claim.id}': {result}",
+                        )
+                    )
+                else:
+                    state.verification_results.append(result)
+
             state.agent_status[AgentName.VERIFICATION] = AgentStatus.DONE
             state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message="RUNNING -> DONE"))
             state.logs.append(
                 AgentLog(
-                    agent=AgentName.VERIFICATION, message="No claims to verify."
+                    agent=AgentName.VERIFICATION,
+                    message="Verification completed successfully.",
                 )
             )
             
             duration = time.time() - start_time
             record_agent_completion(state, agent_name, duration)
             logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
-            
-            return state
 
-        tasks = []
-        for claim in claims:
-            evidence_list = state.evidence_by_claim.get(claim.id, [])
-            tasks.append(_verify_claim(claim, evidence_list, system_prompt, client))
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for claim, result in zip(claims, results):
-            if isinstance(result, Exception):
-                if isinstance(result, (ValidationError, ValueError, TypeError, json.JSONDecodeError)):
-                    raise result
-                
-                state.logs.append(
-                    AgentLog(
-                        agent=AgentName.VERIFICATION,
-                        message=f"Verification failed for claim '{claim.id}': {result}",
-                    )
+        except Exception as e:
+            state.agent_status[AgentName.VERIFICATION] = AgentStatus.ERROR
+            state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message="RUNNING -> ERROR"))
+            state.error = ErrorDetail(
+                stage=AgentName.VERIFICATION,
+                message=str(e),
+                recoverable=False,
+                retry_count=0,
+            )
+            state.logs.append(
+                AgentLog(
+                    agent=AgentName.VERIFICATION,
+                    message=f"Verification fatal failure: {e}",
                 )
-            else:
-                state.verification_results.append(result)
-
-        state.agent_status[AgentName.VERIFICATION] = AgentStatus.DONE
-        state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message="RUNNING -> DONE"))
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.VERIFICATION,
-                message="Verification completed successfully.",
             )
-        )
-        
-        duration = time.time() - start_time
-        record_agent_completion(state, agent_name, duration)
-        logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
+            
+            duration = time.time() - start_time
+            logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
+            raise
 
-    except Exception as e:
-        state.agent_status[AgentName.VERIFICATION] = AgentStatus.ERROR
-        state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message="RUNNING -> ERROR"))
-        state.error = ErrorDetail(
-            stage=AgentName.VERIFICATION,
-            message=str(e),
-            recoverable=False,
-            retry_count=0,
-        )
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.VERIFICATION,
-                message=f"Verification fatal failure: {e}",
-            )
-        )
-        
-        duration = time.time() - start_time
-        logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
-        raise
+        return state
 
-    return state
-
-
-async def run(state: ResearchState) -> ResearchState:
-    return await _verify_all(state)
+    async def run(self, state: ResearchState) -> ResearchState:
+        return await self._verify_all(state)

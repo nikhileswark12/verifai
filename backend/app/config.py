@@ -48,6 +48,16 @@ class Settings:
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # ── Redis & Celery ───────────────────────────────────────────────────────
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", REDIS_URL)
+
+    # ── Job Execution & Recovery ─────────────────────────────────────────────
+    JOB_HEARTBEAT_INTERVAL: int = int(os.getenv("JOB_HEARTBEAT_INTERVAL", "30"))
+    JOB_STALE_TIMEOUT: int = int(os.getenv("JOB_STALE_TIMEOUT", "120"))
+    WORKFLOW_SOFT_TIME_LIMIT: int = int(os.getenv("WORKFLOW_SOFT_TIME_LIMIT", "600"))
+    WORKFLOW_HARD_TIME_LIMIT: int = int(os.getenv("WORKFLOW_HARD_TIME_LIMIT", "660"))
+
     # ── CORS ─────────────────────────────────────────────────────────────────
     # Comma-separated list of allowed origins, e.g.:
     #   http://localhost:5173,https://verifai.example.com

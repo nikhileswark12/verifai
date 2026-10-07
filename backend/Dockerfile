@@ -35,9 +35,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # ── Start command ────────────────────────────────────────────────────────────
-# IMPORTANT: --workers 1 is required.
-# The in-memory JobStore is not shared across OS processes.
-# Running multiple workers causes "Job not found" errors on the polling endpoint.
 # Uvicorn handles SIGTERM gracefully by default (drains in-flight requests).
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", \

@@ -10,7 +10,7 @@ from app.models import (
     ResearchReport,
     ResearchState,
 )
-from app.services.anthropic_client import AnthropicClient
+from app.providers.llm.base import LLMProvider
 from app.services.prompt_loader import load_prompt
 
 
@@ -139,64 +139,66 @@ def _build_report(state: ResearchState, validated_data: Dict[str, Any]) -> Resea
     )
 
 
-async def _generate_report(state: ResearchState) -> ResearchState:
-    old_status = state.agent_status[AgentName.REPORT].upper()
-    state.agent_status[AgentName.REPORT] = AgentStatus.RUNNING
-    state.logs.append(AgentLog(agent=AgentName.REPORT, message=f"{old_status} -> RUNNING"))
+class Reporter:
+    def __init__(self, llm: LLMProvider):
+        self.llm = llm
 
-    agent_name = "report"
-    start_time = time.time()
-    record_agent_start(state, agent_name)
-    logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
+    async def _generate_report(self, state: ResearchState) -> ResearchState:
+        old_status = state.agent_status[AgentName.REPORT].upper()
+        state.agent_status[AgentName.REPORT] = AgentStatus.RUNNING
+        state.logs.append(AgentLog(agent=AgentName.REPORT, message=f"{old_status} -> RUNNING"))
 
-    try:
-        client = AnthropicClient()
-        system_prompt = load_prompt("reporter")
+        agent_name = "report"
+        start_time = time.time()
+        record_agent_start(state, agent_name)
+        logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
 
-        user_prompt = _collect_report_data(state)
-        response_json = await client.generate_json(
-            system_prompt=system_prompt, user_prompt=user_prompt
-        )
+        try:
+            system_prompt = load_prompt("reporter")
 
-        validated = _validate_response(response_json)
-        report = _build_report(state, validated)
-
-        state.report = report
-        state.agent_status[AgentName.REPORT] = AgentStatus.DONE
-        state.logs.append(AgentLog(agent=AgentName.REPORT, message="RUNNING -> DONE"))
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.REPORT,
-                message="Report generated successfully.",
+            user_prompt = _collect_report_data(state)
+            response_json = await self.llm.generate_json(
+                system_prompt=system_prompt, user_prompt=user_prompt
             )
-        )
-        
-        duration = time.time() - start_time
-        record_agent_completion(state, agent_name, duration)
-        logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
 
-    except Exception as e:
-        state.agent_status[AgentName.REPORT] = AgentStatus.ERROR
-        state.logs.append(AgentLog(agent=AgentName.REPORT, message="RUNNING -> ERROR"))
-        state.error = ErrorDetail(
-            stage=AgentName.REPORT,
-            message=str(e),
-            recoverable=False,
-            retry_count=0,
-        )
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.REPORT,
-                message=f"Report fatal failure: {e}",
+            validated = _validate_response(response_json)
+            report = _build_report(state, validated)
+
+            state.report = report
+            state.agent_status[AgentName.REPORT] = AgentStatus.DONE
+            state.logs.append(AgentLog(agent=AgentName.REPORT, message="RUNNING -> DONE"))
+            state.logs.append(
+                AgentLog(
+                    agent=AgentName.REPORT,
+                    message="Report generated successfully.",
+                )
             )
-        )
-        
-        duration = time.time() - start_time
-        logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
-        raise
+            
+            duration = time.time() - start_time
+            record_agent_completion(state, agent_name, duration)
+            logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
 
-    return state
+        except Exception as e:
+            state.agent_status[AgentName.REPORT] = AgentStatus.ERROR
+            state.logs.append(AgentLog(agent=AgentName.REPORT, message="RUNNING -> ERROR"))
+            state.error = ErrorDetail(
+                stage=AgentName.REPORT,
+                message=str(e),
+                recoverable=False,
+                retry_count=0,
+            )
+            state.logs.append(
+                AgentLog(
+                    agent=AgentName.REPORT,
+                    message=f"Report fatal failure: {e}",
+                )
+            )
+            
+            duration = time.time() - start_time
+            logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
+            raise
 
+        return state
 
-async def run(state: ResearchState) -> ResearchState:
-    return await _generate_report(state)
+    async def run(self, state: ResearchState) -> ResearchState:
+        return await self._generate_report(state)

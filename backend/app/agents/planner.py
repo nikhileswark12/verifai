@@ -8,7 +8,7 @@ from app.models import (
     ResearchState,
     SubClaim,
 )
-from app.services.anthropic_client import AnthropicClient
+from app.providers.llm.base import LLMProvider
 from app.services.prompt_loader import load_prompt
 import time
 from app.core.logging import get_logger
@@ -64,65 +64,67 @@ def _create_subclaims(validated_data: List[Dict[str, str]]) -> List[SubClaim]:
     ]
 
 
-async def _run_planner(state: ResearchState) -> ResearchState:
-    if state.error is not None:
+class Planner:
+    def __init__(self, llm: LLMProvider):
+        self.llm = llm
+
+    async def _run_planner(self, state: ResearchState) -> ResearchState:
+        if state.error is not None:
+            return state
+
+        old_status = state.agent_status[AgentName.PLANNER].upper()
+        state.agent_status[AgentName.PLANNER] = AgentStatus.RUNNING
+        state.logs.append(AgentLog(agent=AgentName.PLANNER, message=f"{old_status} -> RUNNING"))
+
+        agent_name = "planner"
+        start_time = time.time()
+        record_agent_start(state, agent_name)
+        logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
+
+        try:
+            system_prompt = load_prompt("planner")
+
+            response_json = await self.llm.generate_json(
+                system_prompt=system_prompt,
+                user_prompt=state.query,
+            )
+
+            validated_data = _validate_response(response_json)
+            state.sub_claims = _create_subclaims(validated_data)
+
+            state.agent_status[AgentName.PLANNER] = AgentStatus.DONE
+            state.logs.append(AgentLog(agent=AgentName.PLANNER, message="RUNNING -> DONE"))
+            state.logs.append(
+                AgentLog(
+                    agent=AgentName.PLANNER,
+                    message="Planner completed successfully.",
+                )
+            )
+            
+            duration = time.time() - start_time
+            record_agent_completion(state, agent_name, duration)
+            logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
+
+        except Exception as e:
+            state.agent_status[AgentName.PLANNER] = AgentStatus.ERROR
+            state.logs.append(AgentLog(agent=AgentName.PLANNER, message="RUNNING -> ERROR"))
+            state.error = ErrorDetail(
+                stage=AgentName.PLANNER,
+                message=str(e),
+                recoverable=False,
+                retry_count=0,
+            )
+            state.logs.append(
+                AgentLog(
+                    agent=AgentName.PLANNER,
+                    message=f"Planner failed: {e}",
+                )
+            )
+            
+            duration = time.time() - start_time
+            logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
+
         return state
 
-    old_status = state.agent_status[AgentName.PLANNER].upper()
-    state.agent_status[AgentName.PLANNER] = AgentStatus.RUNNING
-    state.logs.append(AgentLog(agent=AgentName.PLANNER, message=f"{old_status} -> RUNNING"))
-
-    agent_name = "planner"
-    start_time = time.time()
-    record_agent_start(state, agent_name)
-    logger.info("agent_started", extra={"agent": agent_name, "job_id": state.job_id})
-
-    try:
-        system_prompt = load_prompt("planner")
-        client = AnthropicClient()
-
-        response_json = await client.generate_json(
-            system_prompt=system_prompt,
-            user_prompt=state.query,
-        )
-
-        validated_data = _validate_response(response_json)
-        state.sub_claims = _create_subclaims(validated_data)
-
-        state.agent_status[AgentName.PLANNER] = AgentStatus.DONE
-        state.logs.append(AgentLog(agent=AgentName.PLANNER, message="RUNNING -> DONE"))
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.PLANNER,
-                message="Planner completed successfully.",
-            )
-        )
-        
-        duration = time.time() - start_time
-        record_agent_completion(state, agent_name, duration)
-        logger.info("agent_completed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration})
-
-    except Exception as e:
-        state.agent_status[AgentName.PLANNER] = AgentStatus.ERROR
-        state.logs.append(AgentLog(agent=AgentName.PLANNER, message="RUNNING -> ERROR"))
-        state.error = ErrorDetail(
-            stage=AgentName.PLANNER,
-            message=str(e),
-            recoverable=False,
-            retry_count=0,
-        )
-        state.logs.append(
-            AgentLog(
-                agent=AgentName.PLANNER,
-                message=f"Planner failed: {e}",
-            )
-        )
-        
-        duration = time.time() - start_time
-        logger.error("agent_failed", extra={"agent": agent_name, "job_id": state.job_id, "duration": duration, "error": str(e)})
-
-    return state
-
-
-async def run(state: ResearchState) -> ResearchState:
-    return await _run_planner(state)
+    async def run(self, state: ResearchState) -> ResearchState:
+        return await self._run_planner(state)

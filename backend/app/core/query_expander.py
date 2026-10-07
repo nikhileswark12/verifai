@@ -1,19 +1,18 @@
 from typing import List
-from app.services.anthropic_client import AnthropicClient
+from app.providers.llm.base import LLMProvider
 from app.services.prompt_loader import load_prompt
 
 
-async def expand_query(claim: str) -> List[str]:
+async def expand_query(claim: str, llm: LLMProvider) -> List[str]:
     """
     Expand a sub-claim into multiple targeted search queries using LLM.
     """
-    client = AnthropicClient()
     system_prompt = load_prompt("researcher")
     user_prompt_template = load_prompt("query_expander")
     
     user_prompt = user_prompt_template.replace("{claim}", claim)
     
-    response_data = await client.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
+    response_data = await llm.generate_json(system_prompt=system_prompt, user_prompt=user_prompt)
     
     queries = response_data.get("queries", [])
     if not isinstance(queries, list):

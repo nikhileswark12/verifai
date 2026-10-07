@@ -12,3 +12,7 @@ class JSONParseError(Exception):
 
 class PromptNotFoundError(Exception):
     pass
+
+
+class JobOwnershipLostError(Exception):
+    pass
