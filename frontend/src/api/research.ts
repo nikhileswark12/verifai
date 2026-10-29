@@ -4,6 +4,7 @@ import type {
   ResearchAcceptedResponse,
   ResearchStatusResponse,
   ResearchResultResponse,
+  ResearchReport,
   HealthResponse,
 } from "../types/research";
 
@@ -18,7 +19,11 @@ export const researchApi = {
   },
 
   getResearchResult: async (jobId: string): Promise<ResearchResultResponse> => {
-    return apiClient.get<ResearchResultResponse>(`/research/${jobId}/result`);
+    const data = await apiClient.get<ResearchReport | ResearchResultResponse>(`/research/${jobId}/result`);
+    if ("executive_summary" in data) {
+      return { status: "completed", report: data };
+    }
+    return data;
   },
 
   healthCheck: async (): Promise<HealthResponse> => {

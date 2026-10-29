@@ -4,7 +4,6 @@ import { Button } from "../components/ui/Button";
 import { ExecutiveSummary } from "../components/report/ExecutiveSummary";
 import { AssessmentCard } from "../components/report/AssessmentCard";
 import { ClaimSection } from "../components/report/ClaimSection";
-import { ContradictionSection } from "../components/report/ContradictionSection";
 import { ReferenceList } from "../components/report/ReferenceList";
 
 export function Report() {
@@ -44,12 +43,21 @@ export function Report() {
 
   const report = result.report;
 
+  if (!report && result.status !== "failed") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
+        <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+        <p className="text-slate-600 font-medium">Research is still running. This page will update when the report is ready.</p>
+      </div>
+    );
+  }
+
   if (!report) {
     return (
       <div className="max-w-4xl mx-auto p-6 mt-12 text-center border border-slate-200 border-dashed rounded-xl bg-slate-50">
-        <p className="text-slate-600">No report data found for this job.</p>
-        <Link to="/" className="mt-4 inline-block">
-          <Button variant="secondary">Start New Research</Button>
+        <p className="text-slate-600">No report is available because this research job failed.</p>
+        <Link to={jobId ? `/research?jobId=${jobId}` : "/"} className="mt-4 inline-block">
+          <Button variant="secondary">View Job Status</Button>
         </Link>
       </div>
     );
@@ -88,16 +96,9 @@ export function Report() {
 
       <section className="space-y-6">
         <h2 className="text-xl font-bold text-slate-900 border-b border-slate-200 pb-2">
-          Contradictions Detected
-        </h2>
-        <ContradictionSection contradictions={report.contradictions} />
-      </section>
-
-      <section className="space-y-6">
-        <h2 className="text-xl font-bold text-slate-900 border-b border-slate-200 pb-2">
           References
         </h2>
-        <ReferenceList references={report.references} />
+        <ReferenceList references={[...new Set(report.claims.flatMap((claim) => claim.evidence.map((item) => item.source.url)))]} />
       </section>
     </div>
   );

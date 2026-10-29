@@ -1,91 +1,60 @@
-# VerifAI Backend — Development & Operations Guide
+# VerifAI Backend — Development and Operations
 
-## Quick Start (Local)
+## Prerequisites
+
+Use Python 3.11+, PostgreSQL, Redis, and OpenRouter/Tavily credentials for live research. The backend is database-backed and uses Celery; it is not an in-memory-only application.
+
+## Local startup
+
+From `backend/`:
 
 ```bash
-# 1. Create and activate virtual environment
-python -m venv venv
-.\venv\Scripts\activate          # Windows
-source venv/bin/activate         # macOS / Linux
-
-# 2. Install dependencies
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-
-# 3. Configure environment
-copy .env.example .env           # Windows
-cp .env.example .env             # macOS / Linux
-# Fill in ANTHROPIC_API_KEY and TAVILY_API_KEY in .env
-
-# 4. Start the backend (SINGLE WORKER — required)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+cp .env.example .env
 ```
 
----
-
-## ⚠️ Critical: Single-Worker Requirement
-
-The current `JobStore` is an **in-memory dictionary** (`app/services/job_store.py`).
-
-| Mode | Safe? | Reason |
-|------|-------|--------|
-| `--workers 1` (default) | ✅ Yes | Single process, shared memory |
-| `--workers 2+` | ❌ No | Each worker gets its own isolated memory. A job created by Worker A is invisible to Worker B. `GET /research/{job_id}` returns 404. |
-| `gunicorn --workers 2+` | ❌ No | Same issue — OS-level fork isolation |
-| Kubernetes replicas > 1 | ❌ No | Same issue across pods |
-
-The application **logs a warning at startup** if `WEB_CONCURRENCY > 1` is detected.
-
-**Never run with multiple workers until JobStore is replaced with a shared store (Redis, database, etc.).**
-
----
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Service health check |
-| `POST` | `/research` | Submit a research query → returns `job_id` |
-| `GET` | `/research/{job_id}` | Poll agent statuses |
-| `GET` | `/research/{job_id}/result` | Fetch completed report or error |
-
-### Status codes for `GET /research/{job_id}/result`
-
-| Code | Meaning |
-|------|---------|
-| `200` | Report ready |
-| `202` | Still running — keep polling |
-| `404` | Job not found |
-| `500` | Pipeline failed — structured `ResearchErrorResponse` returned |
-
----
-
-## Failure Handling
-
-When an agent fails (API error, validation error, etc.):
-
-1. `execute_workflow()` catches the exception after all retries are exhausted.
-2. `state.error` is **guaranteed** to be set (`ErrorDetail` with stage, message, retry_count).
-3. The failed agent's `agent_status` entry is set to `"error"`.
-4. `GET /research/{job_id}/result` returns **HTTP 500** with the error detail.
-5. The frontend reads the 500 and displays the error state — **polling stops immediately**.
-
----
-
-## Running Tests
+Fill in `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, and a local PostgreSQL `DATABASE_URL` in `.env`. Start PostgreSQL and Redis, then run:
 
 ```bash
-# Compile check
-python -m compileall app
-
-# Mock end-to-end test (no real API keys needed)
-python tests/test_e2e.py
+alembic upgrade head
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+celery -A app.worker.celery_app worker --loglevel=info
+celery -A app.worker.celery_app beat --loglevel=info
 ```
 
----
+Run the three application processes in separate terminals. Celery beat is needed for the scheduled stale-job sweeper. Keep one API worker unless deployment and connection-pool configuration have been load-tested.
 
-## Production Notes
+## API contract
 
-- Replace `JobStore` with a Redis or database-backed store before scaling beyond one process.
-- Set `CORS_ALLOWED_ORIGINS` to your frontend's production domain.
-- Set `DEBUG=false` (default).
-- Do **not** mount the `.env` file into production containers — use secrets management instead.
+| Method | Path | Result |
+|---|---|---|
+| GET | `/health` | Health and version |
+| POST | `/research` | HTTP 202 with `job_id` and `status: accepted` |
+| GET | `/research/{job_id}` | Overall `status`, `agent_status`, optional error message |
+| GET | `/research/{job_id}/result` | Report on completion, HTTP 202 while running, structured 404/500 error otherwise |
+
+Overall status is `pending`, `running`, `completed`, or `failed`. Agent status values are `pending`, `running`, `done`, or `error`.
+
+## Recovery and failure handling
+
+Jobs and workflow state are stored in PostgreSQL. Celery dispatches execution via Redis. The scheduled sweeper requeues jobs whose heartbeat is older than `JOB_STALE_TIMEOUT`. If Redis is unavailable during submission, the API records a terminal error where possible and returns HTTP 503 instead of silently leaving a pending job.
+
+For production, run API, worker, and beat under a process supervisor. Configure alerting for failed jobs, database failures, and workers that stop heartbeating. Recovered workflows may repeat external searches; agent operations should remain safe to retry.
+
+## Tests
+
+Install test dependencies with `pip install -r requirements-dev.txt`, then run:
+
+```bash
+python -m compileall app
+pytest -q tests/test_regression.py
+```
+
+Database integration tests require a dedicated disposable database. Never point schema-resetting fixtures at production or any database with data that must be preserved.
+
+## Model training and data
+
+Model training is not part of API startup, worker execution, or CI. Keep any training process local and explicitly invoked. Do not use synthetic data. If training is added, use only real, appropriately licensed and documented data, verify provenance, and keep datasets and checkpoints outside version control.

@@ -123,16 +123,32 @@ class JobStore:
         from sqlalchemy import update, text
         from sqlalchemy.sql import func
         # Raw SQL is easier for interval math in Postgres, but we can also use SQLAlchemy text
-        stmt = text(f"""
-            UPDATE research_jobs 
-            SET status = 'PENDING', 
+        stmt = text("""
+            UPDATE research_jobs
+            SET status = 'PENDING',
                 worker_id = NULL,
-                agent_status = jsonb_set(agent_status, '{{orchestrator}}', '"pending"')
-            WHERE status = 'RUNNING' 
-              AND heartbeat_at < NOW() - INTERVAL '{stale_threshold_seconds} seconds' 
+                heartbeat_at = NULL,
+                agent_status = jsonb_set(
+                    jsonb_set(
+                        jsonb_set(
+                            jsonb_set(
+                                jsonb_set(
+                                    jsonb_set(agent_status, '{orchestrator}', '"pending"'),
+                                    '{planner}', '"pending"'
+                                ),
+                                '{research}', '"pending"'
+                            ),
+                            '{verification}', '"pending"'
+                        ),
+                        '{contradiction}', '"pending"'
+                    ),
+                    '{report}', '"pending"'
+                )
+            WHERE status = 'RUNNING'
+              AND heartbeat_at < NOW() - make_interval(secs => :stale_seconds)
             RETURNING id
         """)
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(stmt, {"stale_seconds": max(1, int(stale_threshold_seconds))})
         recovered_ids = [str(row[0]) for row in result.fetchall()]
         if recovered_ids:
             await self.session.commit()

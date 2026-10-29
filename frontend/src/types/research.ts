@@ -16,7 +16,7 @@ export interface Source {
   name: string;
   url: string;
   domain: string;
-  tier: "HIGH" | "MEDIUM" | "LOW";
+  tier: "high" | "medium" | "low" | "HIGH" | "MEDIUM" | "LOW";
 }
 
 export interface Evidence {
@@ -26,20 +26,20 @@ export interface Evidence {
 }
 
 export interface ConfidenceBreakdown {
-  reliability: number;
-  agreement: number;
-  evidence_strength: number;
-  citation_completeness: number;
+  overall_score: number;
+  source_count_score: number;
+  reliability_score: number;
+  agreement_score: number;
+  citation_score: number;
 }
 
 export interface Claim {
   sub_claim_id: string;
   text: string;
-  status: "VERIFIED" | "WEAKLY_SUPPORTED" | "CONFLICTING" | "UNSUPPORTED";
+  status: "verified" | "weakly_supported" | "conflicting" | "unsupported" | "VERIFIED" | "WEAKLY_SUPPORTED" | "CONFLICTING" | "UNSUPPORTED";
   evidence: Evidence[];
-  confidence: {
-    overall_score: number;
-    explanation: string;
+  confidence: ConfidenceBreakdown & {
+    explanation?: string;
     breakdown?: ConfidenceBreakdown;
   };
   contradiction_notes: string[];
@@ -61,7 +61,7 @@ export interface ContradictionPair {
 export interface ResearchReport {
   query: string;
   executive_summary: string;
-  overall_assessment: string;
+  overall_assessment?: string;
   claims: Claim[];
   contradictions?: ContradictionPair[];
   references?: string[];
@@ -86,7 +86,9 @@ export interface ResearchStatusResponse {
   verification?: string;
   contradiction?: string;
   report?: string;
-  [key: string]: string | undefined;
+  agent_status?: Record<string, string>;
+  error_message?: string | null;
+  [key: string]: string | Record<string, string> | null | undefined;
 }
 
 export interface ResearchResultResponse {

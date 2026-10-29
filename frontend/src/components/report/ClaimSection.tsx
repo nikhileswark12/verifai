@@ -26,8 +26,8 @@ export function ClaimSection({ claims }: ClaimSectionProps) {
             {claim.confidence && (
               <ConfidenceCard 
                 overallScore={claim.confidence.overall_score} 
-                explanation={claim.confidence.explanation}
-                breakdown={claim.confidence.breakdown}
+                explanation={claim.explanation ?? claim.confidence.explanation ?? "Confidence is based on source reliability, evidence agreement, source count, and citation coverage."}
+                breakdown={claim.confidence.breakdown ?? claim.confidence}
               />
             )}
             

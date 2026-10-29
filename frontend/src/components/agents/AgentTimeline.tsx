@@ -13,7 +13,7 @@ export function AgentTimeline({ status }: AgentTimelineProps) {
   return (
     <div className="relative space-y-6 before:absolute before:inset-0 before:ml-7 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
       {AGENT_PIPELINE.map((agent) => {
-        const rawStatus = status[agent.id];
+        const rawStatus = status.agent_status?.[agent.id] ?? status[agent.id];
         const mappedStatus = mapAgentStatus(rawStatus);
 
         return (

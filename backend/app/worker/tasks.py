@@ -125,21 +125,21 @@ def sweep_stale_jobs():
     async def _sweep():
         if not async_session:
             logger.error("async_session is not initialized (DATABASE_URL missing?)")
-            return 0
-            
+            return []
         async with async_session() as session:
             job_store = JobStore(session)
             try:
-                recovered = await job_store.recover_stale_jobs(settings.JOB_STALE_TIMEOUT)
-                return len(recovered)
-            except Exception as e:
-                logger.error(f"Failed to recover stale jobs: {e}")
-                return 0
+                return await job_store.recover_stale_jobs(settings.JOB_STALE_TIMEOUT)
+            except Exception:
+                logger.exception("Failed to recover stale jobs")
+                return []
 
-    recovered_count = asyncio.run(_sweep())
-    
-    if recovered_count > 0:
-        logger.info(f"Recovered {recovered_count} stale jobs")
-        
-    logger.info("Stale job sweep completed")
-    return {"recovered": recovered_count}
+    recovered_ids = asyncio.run(_sweep())
+    for recovered_job_id in recovered_ids:
+        try:
+            execute_research_job.delay(recovered_job_id)
+        except Exception:
+            logger.exception("Failed to re-enqueue recovered job %s", recovered_job_id)
+
+    logger.info("Stale job sweep completed; recovered=%d", len(recovered_ids))
+    return {"recovered": len(recovered_ids)}

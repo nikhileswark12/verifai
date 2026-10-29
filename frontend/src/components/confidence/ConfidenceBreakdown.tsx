@@ -7,10 +7,10 @@ interface ConfidenceBreakdownProps {
 
 export function ConfidenceBreakdown({ breakdown }: ConfidenceBreakdownProps) {
   const metrics = [
-    { label: "Source Reliability", value: breakdown.reliability },
-    { label: "Evidence Agreement", value: breakdown.agreement },
-    { label: "Evidence Strength", value: breakdown.evidence_strength },
-    { label: "Citation Completeness", value: breakdown.citation_completeness }
+    { label: "Source Reliability", value: breakdown.reliability_score },
+    { label: "Evidence Agreement", value: breakdown.agreement_score },
+    { label: "Source Count", value: breakdown.source_count_score },
+    { label: "Citation Score", value: breakdown.citation_score }
   ];
 
   return (

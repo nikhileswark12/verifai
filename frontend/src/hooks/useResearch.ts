@@ -55,18 +55,16 @@ export function useResearchStatus(jobId: string | null) {
         setError(null);
 
         // Continue polling if not completed/failed
-        const isCompleted = data.status === "completed" || data.status === "failed";
-        const allAgentsDone = data.report === "done" || data.report === "failed";
-        
-        if (!isCompleted && !allAgentsDone) {
+        const isTerminal = data.status === "completed" || data.status === "failed";
+        const reportStatus = data.agent_status?.report ?? data.report;
+        const reportTerminal = reportStatus === "done" || reportStatus === "error" || reportStatus === "failed";
+        if (!isTerminal && !reportTerminal) {
           timeoutId = window.setTimeout(poll, API_CONSTANTS.POLL_INTERVAL);
         }
       } catch (err: unknown) {
         if (!isMounted) return;
         const errorMessage = err instanceof Error ? err.message : "Failed to fetch status";
         setError(errorMessage);
-        // On network error, we might choose to retry or stop. 
-        // We'll stop for simplicity on hard error.
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -94,14 +92,17 @@ export function useResearchResult(jobId: string | null, enabled: boolean = false
     }
 
     let isMounted = true;
+    let timeoutId: number | undefined;
 
     const fetchResult = async () => {
       setIsLoading(true);
-      setError(null);
       try {
         const data = await researchApi.getResearchResult(jobId);
-        if (isMounted) {
-          setResult(data);
+        if (!isMounted) return;
+        setResult(data);
+        setError(null);
+        if (!data.report && data.status !== "failed") {
+          timeoutId = window.setTimeout(fetchResult, API_CONSTANTS.POLL_INTERVAL);
         }
       } catch (err: unknown) {
         if (isMounted) {
@@ -109,9 +110,7 @@ export function useResearchResult(jobId: string | null, enabled: boolean = false
           setError(errorMessage);
         }
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        if (isMounted) setIsLoading(false);
       }
     };
 
@@ -119,6 +118,7 @@ export function useResearchResult(jobId: string | null, enabled: boolean = false
 
     return () => {
       isMounted = false;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [jobId, enabled]);
 

@@ -269,7 +269,9 @@ class AgentStatusEvent(VerifAIModel):
 
 class ResearchStatusResponse(VerifAIModel):
     job_id: str
+    status: Literal["pending", "running", "completed", "failed"]
     agent_status: Dict[AgentName, AgentStatus]
+    error_message: Optional[str] = None
 
 
 class ResearchErrorResponse(VerifAIModel):
