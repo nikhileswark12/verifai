@@ -58,6 +58,7 @@ class Evidence(Base):
     source_url: Mapped[str] = mapped_column(String, nullable=False)
     source_domain: Mapped[str] = mapped_column(String, nullable=False)
     source_tier: Mapped[SourceTier] = mapped_column(SQLEnum(SourceTier, name="source_tier_enum", create_type=True), nullable=False)
+    retrieved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     job = relationship("ResearchJob", back_populates="evidence")
 

@@ -254,4 +254,116 @@ async def test_complete_workflow(
     assert final_state.agent_status[AgentName.VERIFICATION] == AgentStatus.DONE
     assert final_state.agent_status[AgentName.CONTRADICTION] == AgentStatus.DONE
     assert final_state.agent_status[AgentName.REPORT] == AgentStatus.DONE
+    assert final_state.agent_status[AgentName.ORCHESTRATOR] == AgentStatus.DONE
     assert final_state.report is not None
+
+
+def test_database_state_reconstruction_preserves_evidence_metadata():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from uuid import UUID, uuid4
+    from app.models import Evidence as DomainEvidence, Source as DomainSource, SourceTier
+    from app.services.job_store import JobStore
+
+    job_id = uuid4()
+    claim_id = str(uuid4())
+    retrieved_at = datetime(2026, 10, 1, 12, 30, tzinfo=timezone.utc)
+    source = DomainSource(
+        name="Test source",
+        domain="example.com",
+        url="https://example.com/article",
+        tier=SourceTier.HIGH,
+    )
+    evidence_a = DomainEvidence(source=source, snippet="Evidence A", retrieved_at=retrieved_at)
+    evidence_b = DomainEvidence(source=source, snippet="Evidence B", retrieved_at=retrieved_at)
+    contradiction = SimpleNamespace(
+        id=uuid4(),
+        job_id=job_id,
+        explanation="Conflicting statements",
+        contradiction_type=ContradictionType.DIRECT,
+        severity=0.7,
+        evidence_references={
+            "claim_id": claim_id,
+            "source_a": evidence_a.model_dump(mode="json"),
+            "source_b": evidence_b.model_dump(mode="json"),
+        },
+    )
+    stored_evidence = SimpleNamespace(
+        id=uuid4(),
+        claim_id=UUID(claim_id),
+        snippet="Stored evidence",
+        source_name="Test source",
+        source_url="https://example.com/article",
+        source_domain="example.com",
+        source_tier=SourceTier.HIGH,
+        retrieved_at=retrieved_at,
+    )
+    db_job = SimpleNamespace(
+        id=job_id,
+        query="Test query",
+        created_at=retrieved_at,
+        sub_claims=[],
+        evidence=[stored_evidence],
+        verification_results=[],
+        contradictions=[contradiction],
+        claims=[],
+        report=None,
+        agent_status={},
+        logs=[],
+        error_detail=None,
+        meta_data={},
+    )
+
+    state = JobStore(None)._db_to_state(db_job)
+
+    assert state.contradictions[0].claim_id == claim_id
+    assert state.contradictions[0].source_a.retrieved_at == retrieved_at
+    assert state.evidence_by_claim[claim_id][0].retrieved_at == retrieved_at
+
+
+def test_database_state_reconstruction_skips_legacy_contradiction_without_claim_link():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app.models import Evidence as DomainEvidence, Source as DomainSource, SourceTier
+    from app.services.job_store import JobStore
+
+    job_id = uuid4()
+    source = DomainSource(
+        name="Test source",
+        domain="example.com",
+        url="https://example.com/article",
+        tier=SourceTier.HIGH,
+    )
+    evidence_a = DomainEvidence(source=source, snippet="Evidence A")
+    evidence_b = DomainEvidence(source=source, snippet="Evidence B")
+    contradiction = SimpleNamespace(
+        id=uuid4(),
+        job_id=job_id,
+        explanation="Legacy record without claim linkage",
+        contradiction_type=ContradictionType.DIRECT,
+        severity=0.7,
+        evidence_references={
+            "source_a": evidence_a.model_dump(mode="json"),
+            "source_b": evidence_b.model_dump(mode="json"),
+        },
+    )
+    db_job = SimpleNamespace(
+        id=job_id,
+        query="Test query",
+        created_at=datetime.now(timezone.utc),
+        sub_claims=[],
+        evidence=[],
+        verification_results=[],
+        contradictions=[contradiction],
+        claims=[],
+        report=None,
+        agent_status={},
+        logs=[],
+        error_detail=None,
+        meta_data={},
+    )
+
+    state = JobStore(None)._db_to_state(db_job)
+
+    assert state.contradictions == []

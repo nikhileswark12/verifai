@@ -91,4 +91,4 @@ Model training is deliberately outside the application runtime and remains a loc
 - Set `CORS_ALLOWED_ORIGINS` to exact frontend origins.
 - Use a dedicated disposable database for automated tests.
 - Configure PostgreSQL backups, Redis availability, and worker/beat process supervision before production use.
-- CI checks do not replace a live integration test against configured PostgreSQL, Redis, OpenRouter, and Tavily services.
+- Regression checks do not replace a live integration test against configured PostgreSQL, Redis, OpenRouter, and Tavily services.

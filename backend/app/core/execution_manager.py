@@ -43,6 +43,7 @@ async def execute_workflow(state: ResearchState, job_store=None, worker_id: str 
                     if job_store:
                         await job_store.update(state, worker_id=worker_id)
             
+            state.agent_status[AgentName.ORCHESTRATOR] = AgentStatus.DONE
             state.metadata["execution"].update({
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "duration_seconds": int(time.time() - start_time),

@@ -79,8 +79,7 @@ class JobStore:
         if not db_job:
             return False
             
-        current_status = db_job.agent_status.get(AgentName.ORCHESTRATOR.value, AgentStatus.PENDING.value)
-        if current_status != AgentStatus.PENDING.value:
+        if db_job.status != AgentStatus.PENDING or db_job.worker_id is not None:
             return False
             
         # Claim ownership
@@ -120,14 +119,13 @@ class JobStore:
         await self.session.commit()
 
     async def recover_stale_jobs(self, stale_threshold_seconds: int) -> List[str]:
-        from sqlalchemy import update, text
-        from sqlalchemy.sql import func
-        # Raw SQL is easier for interval math in Postgres, but we can also use SQLAlchemy text
+        from sqlalchemy import text
         stmt = text("""
             UPDATE research_jobs
             SET status = 'PENDING',
                 worker_id = NULL,
                 heartbeat_at = NULL,
+                updated_at = NOW(),
                 agent_status = jsonb_set(
                     jsonb_set(
                         jsonb_set(
@@ -144,8 +142,10 @@ class JobStore:
                     ),
                     '{report}', '"pending"'
                 )
-            WHERE status = 'RUNNING'
-              AND heartbeat_at < NOW() - make_interval(secs => :stale_seconds)
+            WHERE (status = 'RUNNING'
+                   AND heartbeat_at < NOW() - make_interval(secs => :stale_seconds))
+               OR (status = 'PENDING'
+                   AND updated_at < NOW() - make_interval(secs => :stale_seconds))
             RETURNING id
         """)
         result = await self.session.execute(stmt, {"stale_seconds": max(1, int(stale_threshold_seconds))})
@@ -208,7 +208,8 @@ class JobStore:
                     source_name=ev.source.name,
                     source_url=str(ev.source.url),
                     source_domain=ev.source.domain,
-                    source_tier=ev.source.tier
+                    source_tier=ev.source.tier,
+                    retrieved_at=ev.retrieved_at
                 ))
 
         # Update VerificationResults
@@ -233,6 +234,7 @@ class JobStore:
                 contradiction_type=c.contradiction_type,
                 severity=c.severity,
                 evidence_references={
+                    "claim_id": c.claim_id,
                     "source_a": c.source_a.model_dump(mode='json'),
                     "source_b": c.source_b.model_dump(mode='json')
                 }
@@ -245,6 +247,13 @@ class JobStore:
             db_job.report.executive_summary = state.report.executive_summary
             db_job.report.conclusion = state.report.conclusion
             db_job.report.generated_at = state.report.generated_at
+
+        if state.report is not None:
+            db_job.status = AgentStatus.DONE
+        elif state.error is not None:
+            db_job.status = AgentStatus.ERROR
+        else:
+            db_job.status = AgentStatus.RUNNING
 
         await self.session.commit()
         # To avoid caching issues where an object gets modified later
@@ -291,7 +300,7 @@ class JobStore:
                         tier=ev.source_tier
                     ),
                     snippet=ev.snippet,
-                    retrieved_at=db_job.created_at # mock fallback for retrieved_at
+                    retrieved_at=ev.retrieved_at
                 )
             )
             
@@ -332,11 +341,12 @@ class JobStore:
             source_a = Evidence.model_validate(sa) if sa else None
             source_b = Evidence.model_validate(sb) if sb else None
             
-            if source_a and source_b:
+            claim_id = c.evidence_references.get("claim_id")
+            if source_a and source_b and claim_id:
                 contradictions.append(
                     ContradictionPair(
                         id=str(c.id),
-                        claim_id=str(c.job_id), # Mock since model was refactored
+                        claim_id=str(claim_id),
                         source_a=source_a,
                         source_b=source_b,
                         explanation=c.explanation,

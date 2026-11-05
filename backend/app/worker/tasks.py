@@ -37,7 +37,8 @@ async def _run_workflow_async(job_id: str, worker_id: str) -> None:
                     while True:
                         await asyncio.sleep(settings.JOB_HEARTBEAT_INTERVAL)
                         try:
-                            await job_store.record_heartbeat(job_id, worker_id)
+                            async with async_session() as heartbeat_session:
+                                await JobStore(heartbeat_session).record_heartbeat(job_id, worker_id)
                         except JobOwnershipLostError:
                             logger.error(f"Worker {worker_id} lost ownership during heartbeat for {job_id}")
                             break # cleanly exit heartbeat loop

@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 import logging
-import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,27 +18,10 @@ async def lifespan(app: FastAPI):
     """
     Startup / shutdown lifecycle hook.
 
-    IMPORTANT — JobStore is in-memory. Running multiple OS processes (e.g.
-    uvicorn --workers 2 or gunicorn) will create isolated memory spaces: jobs
-    created in worker A will not be visible to worker B.
-
-    Always start with a SINGLE worker:
-        uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    PostgreSQL is the durable job store. API processes share persisted state;
+    Celery workers claim jobs with database row locks and ownership tokens.
     """
-    workers = int(os.getenv("WEB_CONCURRENCY", "1"))
-    if workers > 1:
-        _startup_logger.warning(
-            "JobStore MULTI-WORKER WARNING: WEB_CONCURRENCY=%d. "
-            "The in-memory JobStore is NOT shared across OS processes. "
-            "Jobs will appear missing when handled by different workers. "
-            "Set --workers 1 for local development.",
-            workers,
-        )
-    else:
-        _startup_logger.info(
-            "JobStore running in single-process mode (PID %d). Job visibility is guaranteed.",
-            os.getpid(),
-        )
+    _startup_logger.info("VerifAI API starting with PostgreSQL-backed job persistence")
     yield  # application runs here
 
 app = FastAPI(

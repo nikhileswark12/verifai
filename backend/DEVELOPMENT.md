@@ -53,7 +53,7 @@ python -m compileall app
 pytest -q tests/test_regression.py
 ```
 
-Database integration tests require a dedicated disposable database. Never point schema-resetting fixtures at production or any database with data that must be preserved.
+Database integration tests require a dedicated disposable database. Never point schema-resetting fixtures at production or any database with data that must be preserved. Heartbeat writes use independent SQLAlchemy sessions; a single AsyncSession must never be shared by concurrent tasks. The sweeper retries old pending dispatches as well as stale running jobs, so transient broker failures do not strand jobs.
 
 ## Model training and data
 

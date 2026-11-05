@@ -4,7 +4,7 @@ VerifAI — Application Configuration
 Loads environment variables (from .env locally, or the host environment in
 production) and exposes them as a typed Settings singleton.
 
-IMPORTANT: Do NOT add default values for secrets (ANTHROPIC_API_KEY,
+IMPORTANT: Do NOT add default values for secrets (OPENROUTER_API_KEY,
 TAVILY_API_KEY). Missing secrets raise a clear error at startup rather than
 failing silently mid-request.
 """

@@ -103,7 +103,7 @@ class Evidence(VerifAIModel):
         ...,
         max_length=1000,
     )
-    retrieved_at: datetime = Field(default_factory=_utcnow)
+    retrieved_at: Optional[datetime] = Field(default_factory=_utcnow)
 
 
 class ConfidenceBreakdown(VerifAIModel):
