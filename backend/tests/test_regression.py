@@ -196,6 +196,7 @@ async def test_reporter_contract(base_state):
     assert result_state.agent_status[AgentName.REPORT] == AgentStatus.DONE
     assert result_state.report is not None
     assert result_state.report.executive_summary == "Exec sum"
+    assert result_state.report.overall_assessment == "Good"
     assert len(result_state.report.claims) == 1
 
 
@@ -367,3 +368,33 @@ def test_database_state_reconstruction_skips_legacy_contradiction_without_claim_
     state = JobStore(None)._db_to_state(db_job)
 
     assert state.contradictions == []
+
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_reports_dependency_status():
+    import json
+    from unittest.mock import AsyncMock, patch
+    from app.routes import health
+
+    with (
+        patch("app.routes.health._check_database", new=AsyncMock(return_value=True)),
+        patch("app.routes.health._check_redis", new=AsyncMock(return_value=True)),
+    ):
+        response = await health.health()
+
+    assert response.status_code == 200
+    payload = json.loads(response.body)
+    assert payload["status"] == "healthy"
+    assert payload["services"] == {"database": "available", "redis": "available"}
+
+    with (
+        patch("app.routes.health._check_database", new=AsyncMock(return_value=False)),
+        patch("app.routes.health._check_redis", new=AsyncMock(return_value=True)),
+    ):
+        response = await health.health()
+
+    assert response.status_code == 503
+    payload = json.loads(response.body)
+    assert payload["status"] == "degraded"
+    assert payload["services"]["database"] == "unavailable"

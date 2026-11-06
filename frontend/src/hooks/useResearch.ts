@@ -6,6 +6,9 @@ import type {
   ResearchResultResponse,
 } from "../types/research";
 
+const retryDelay = (attempt: number) =>
+  Math.min(API_CONSTANTS.POLL_INTERVAL * 2 ** (attempt - 1), 15000);
+
 export function useCreateResearch() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,23 +41,27 @@ export function useResearchStatus(jobId: string | null) {
   useEffect(() => {
     if (!jobId) {
       setStatus(null);
+      setError(null);
       return;
     }
 
     let isMounted = true;
-    let timeoutId: number;
+    let timeoutId: number | undefined;
+    let retries = 0;
 
     const poll = async () => {
+      if (!isMounted) return;
+      let retryScheduled = false;
+
       try {
         setIsLoading(true);
         const data = await researchApi.getResearchStatus(jobId);
-        
         if (!isMounted) return;
-        
+
+        retries = 0;
         setStatus(data);
         setError(null);
 
-        // Continue polling if not completed/failed
         const isTerminal = data.status === "completed" || data.status === "failed";
         const reportStatus = data.agent_status?.report ?? data.report;
         const reportTerminal = reportStatus === "done" || reportStatus === "error" || reportStatus === "failed";
@@ -63,10 +70,16 @@ export function useResearchStatus(jobId: string | null) {
         }
       } catch (err: unknown) {
         if (!isMounted) return;
-        const errorMessage = err instanceof Error ? err.message : "Failed to fetch status";
-        setError(errorMessage);
+        retries += 1;
+        if (retries <= API_CONSTANTS.MAX_RETRIES) {
+          retryScheduled = true;
+          timeoutId = window.setTimeout(poll, retryDelay(retries));
+        } else {
+          const errorMessage = err instanceof Error ? err.message : "Failed to fetch status";
+          setError(errorMessage);
+        }
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (isMounted && !retryScheduled) setIsLoading(false);
       }
     };
 
@@ -74,7 +87,7 @@ export function useResearchStatus(jobId: string | null) {
 
     return () => {
       isMounted = false;
-      clearTimeout(timeoutId);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [jobId]);
 
@@ -93,24 +106,35 @@ export function useResearchResult(jobId: string | null, enabled: boolean = false
 
     let isMounted = true;
     let timeoutId: number | undefined;
+    let retries = 0;
 
     const fetchResult = async () => {
+      if (!isMounted) return;
+      let retryScheduled = false;
       setIsLoading(true);
+
       try {
         const data = await researchApi.getResearchResult(jobId);
         if (!isMounted) return;
+
+        retries = 0;
         setResult(data);
         setError(null);
         if (!data.report && data.status !== "failed") {
           timeoutId = window.setTimeout(fetchResult, API_CONSTANTS.POLL_INTERVAL);
         }
       } catch (err: unknown) {
-        if (isMounted) {
+        if (!isMounted) return;
+        retries += 1;
+        if (retries <= API_CONSTANTS.MAX_RETRIES) {
+          retryScheduled = true;
+          timeoutId = window.setTimeout(fetchResult, retryDelay(retries));
+        } else {
           const errorMessage = err instanceof Error ? err.message : "Failed to fetch result";
           setError(errorMessage);
         }
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (isMounted && !retryScheduled) setIsLoading(false);
       }
     };
 

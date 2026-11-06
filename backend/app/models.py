@@ -151,6 +151,7 @@ class ResearchReport(VerifAIModel):
     id: str = Field(default_factory=_new_id)
     query: str
     executive_summary: str
+    overall_assessment: Optional[str] = None
     claims: List[Claim] = Field(default_factory=list)
     overall_confidence: float = Field(
         ...,

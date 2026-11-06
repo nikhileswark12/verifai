@@ -133,6 +133,7 @@ def _build_report(state: ResearchState, validated_data: Dict[str, Any]) -> Resea
     return ResearchReport(
         query=state.query,
         executive_summary=validated_data["executive_summary"],
+        overall_assessment=validated_data["overall_assessment"],
         claims=claims,
         overall_confidence=overall_confidence,
         conclusion=conclusion,
