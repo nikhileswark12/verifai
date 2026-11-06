@@ -1,8 +1,6 @@
 import asyncio
 from typing import Any, Dict, List
 from urllib.parse import urlparse
-import json
-from pydantic import ValidationError
 
 from app.models import (
     AgentLog,

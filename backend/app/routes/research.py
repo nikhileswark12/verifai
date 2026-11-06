@@ -84,10 +84,10 @@ async def get_research_status(
         )
         return JSONResponse(status_code=404, content=error_response.model_dump())
 
-    if state.report is not None:
-        overall_status = "completed"
-    elif state.error is not None or any(value == AgentStatus.ERROR for value in state.agent_status.values()):
+    if state.error is not None or any(value == AgentStatus.ERROR for value in state.agent_status.values()):
         overall_status = "failed"
+    elif state.report is not None and state.agent_status.get(AgentName.REPORT) == AgentStatus.DONE:
+        overall_status = "completed"
     elif any(value == AgentStatus.RUNNING for value in state.agent_status.values()) or any(
         value == AgentStatus.DONE for value in state.agent_status.values()
     ):

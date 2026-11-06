@@ -43,6 +43,31 @@ async def execute_workflow(state: ResearchState, job_store=None, worker_id: str 
                     if job_store:
                         await job_store.update(state, worker_id=worker_id)
             
+            if state.error is not None:
+                state.agent_status[AgentName.ORCHESTRATOR] = AgentStatus.ERROR
+                state.metadata["execution"].update({
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "duration_seconds": int(time.time() - start_time),
+                    "status": "failed"
+                })
+                return state
+
+            if state.report is None or state.agent_status.get(AgentName.REPORT) != AgentStatus.DONE:
+                state.error = ErrorDetail(
+                    stage=AgentName.REPORT,
+                    message="Workflow ended without producing a completed research report.",
+                    recoverable=False,
+                    retry_count=retry_count,
+                )
+                state.agent_status[AgentName.REPORT] = AgentStatus.ERROR
+                state.agent_status[AgentName.ORCHESTRATOR] = AgentStatus.ERROR
+                state.metadata["execution"].update({
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "duration_seconds": int(time.time() - start_time),
+                    "status": "failed"
+                })
+                return state
+
             state.agent_status[AgentName.ORCHESTRATOR] = AgentStatus.DONE
             state.metadata["execution"].update({
                 "completed_at": datetime.now(timezone.utc).isoformat(),

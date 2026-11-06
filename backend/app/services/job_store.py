@@ -248,10 +248,10 @@ class JobStore:
             db_job.report.conclusion = state.report.conclusion
             db_job.report.generated_at = state.report.generated_at
 
-        if state.report is not None:
-            db_job.status = AgentStatus.DONE
-        elif state.error is not None:
+        if state.error is not None:
             db_job.status = AgentStatus.ERROR
+        elif state.report is not None and state.agent_status.get(AgentName.REPORT) == AgentStatus.DONE:
+            db_job.status = AgentStatus.DONE
         else:
             db_job.status = AgentStatus.RUNNING
 
