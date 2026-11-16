@@ -100,6 +100,7 @@ class ResearchReport(Base):
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("research_jobs.id"), nullable=False, unique=True)
     
     executive_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    overall_assessment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     conclusion: Mapped[str] = mapped_column(Text, nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

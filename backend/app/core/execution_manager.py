@@ -98,11 +98,17 @@ async def execute_workflow(state: ResearchState, job_store=None, worker_id: str 
                     )
                 )
                 
-                # Reset agent statuses to PENDING for retry if they were in ERROR
-                for agent_name, status in state.agent_status.items():
-                    if status == "error" or status == "running":
-                        state.agent_status[agent_name] = "pending"
-                
+                # A retry restarts the complete graph from the planner. Clear every
+                # prior-stage artifact so results from the failed attempt cannot leak
+                # into the new attempt.
+                for agent_name in list(state.agent_status):
+                    state.agent_status[agent_name] = AgentStatus.PENDING
+                state.sub_claims = []
+                state.evidence_by_claim = {}
+                state.verification_results = []
+                state.contradictions = []
+                state.claims = []
+                state.report = None
                 state.error = None
                 continue
                 

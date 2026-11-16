@@ -206,3 +206,92 @@ def test_celery_beat_config_present():
     config = beat_schedule["sweep-stale-jobs-every-60s"]
     assert config["task"] == "sweep_stale_jobs"
     assert config["schedule"] == 60.0
+
+
+@pytest.mark.asyncio
+async def test_recovery_clears_artifacts_from_previous_attempt(session_maker):
+    from app.models import (
+        ClaimStatus,
+        ConfidenceBreakdown,
+        ContradictionPair,
+        Evidence,
+        ResearchReport,
+        Source,
+        SourceTier,
+        SubClaim,
+        VerificationResult,
+    )
+
+    async with session_maker() as session:
+        store = JobStore(session)
+        state = ResearchState(query="Recovery artifact cleanup")
+        claim_a = SubClaim(text="Claim A", rationale="Reason A")
+        claim_b = SubClaim(text="Claim B", rationale="Reason B")
+        source_a = Source(name="Source A", domain="a.example", url="https://a.example", tier=SourceTier.HIGH)
+        source_b = Source(name="Source B", domain="b.example", url="https://b.example", tier=SourceTier.MEDIUM)
+        evidence_a = Evidence(source=source_a, snippet="Evidence A")
+        evidence_b = Evidence(source=source_b, snippet="Evidence B")
+        confidence = ConfidenceBreakdown(
+            overall_score=70, source_count_score=70, reliability_score=70,
+            agreement_score=70, citation_score=100,
+        )
+        state.sub_claims = [claim_a, claim_b]
+        state.evidence_by_claim = {
+            claim_a.id: [evidence_a],
+            claim_b.id: [evidence_b],
+        }
+        state.verification_results = [
+            VerificationResult(
+                claim_id=claim_a.id, status=ClaimStatus.VERIFIED,
+                supporting_evidence=[evidence_a], confidence=confidence, reasoning="A",
+            ),
+            VerificationResult(
+                claim_id=claim_b.id, status=ClaimStatus.VERIFIED,
+                supporting_evidence=[evidence_b], confidence=confidence, reasoning="B",
+            ),
+        ]
+        state.contradictions = [
+            ContradictionPair(
+                claim_id=f"{claim_a.id},{claim_b.id}",
+                source_a=evidence_a,
+                source_b=evidence_b,
+                explanation="Conflicting evidence",
+                severity=0.6,
+            )
+        ]
+        state.report = ResearchReport(
+            query=state.query,
+            executive_summary="Old summary",
+            overall_assessment="Old assessment",
+            claims=[],
+            overall_confidence=70,
+            conclusion="Old conclusion",
+        )
+
+        await store.create(state)
+        await store.update(state)
+        job_id = state.job_id
+        await session.execute(
+            text("UPDATE research_jobs SET status = 'PENDING', worker_id = NULL WHERE id = :job_id"),
+            {"job_id": job_id},
+        )
+        await session.commit()
+        assert await store.claim_job(job_id, "worker_old")
+        await session.execute(
+            text("UPDATE research_jobs SET heartbeat_at = NOW() - INTERVAL '150 seconds' WHERE id = :job_id"),
+            {"job_id": job_id},
+        )
+        await session.commit()
+
+    async with session_maker() as session:
+        store = JobStore(session)
+        recovered = await store.recover_stale_jobs(120)
+        assert recovered == [job_id]
+        state = await store.get(job_id)
+
+    assert state.sub_claims == []
+    assert state.evidence_by_claim == {}
+    assert state.verification_results == []
+    assert state.contradictions == []
+    assert state.claims == []
+    assert state.report is None

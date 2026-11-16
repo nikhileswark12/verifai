@@ -150,20 +150,23 @@ class Contradiction:
 
             tasks = [self._compare_pair(a, b, system_prompt) for a, b in pairs]
             comparison_results = await asyncio.gather(*tasks, return_exceptions=True)
+            failures = [
+                (pair, result)
+                for pair, result in zip(pairs, comparison_results)
+                if isinstance(result, Exception)
+            ]
+            if failures:
+                details = "; ".join(
+                    f"{pair[0].claim_id}/{pair[1].claim_id}: {error}"
+                    for pair, error in failures
+                )
+                raise RuntimeError(
+                    f"Contradiction analysis failed for one or more claim pairs: {details}"
+                ) from failures[0][1]
 
-            for pair, result in zip(pairs, comparison_results):
-                if isinstance(result, Exception):
-                    if isinstance(result, (ValidationError, ValueError, TypeError, json.JSONDecodeError)):
-                        raise result
-                    
-                    state.logs.append(
-                        AgentLog(
-                            agent=AgentName.CONTRADICTION,
-                            message=f"Comparison failed between {pair[0].claim_id} and {pair[1].claim_id}: {result}",
-                        )
-                    )
-                elif result is not None:
-                    state.contradictions.append(result)
+            state.contradictions.extend(
+                result for result in comparison_results if result is not None
+            )
 
             state.agent_status[AgentName.CONTRADICTION] = AgentStatus.DONE
             state.logs.append(AgentLog(agent=AgentName.CONTRADICTION, message="RUNNING -> DONE"))

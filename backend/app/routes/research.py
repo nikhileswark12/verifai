@@ -17,6 +17,7 @@ from app.models import (
 )
 from app.services.job_store import JobStore
 from app.worker.tasks import execute_research_job
+from app.core.rate_limit import enforce_research_rate_limit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 async def create_research_job(
     request: ResearchRequest,
     job_store: JobStore = Depends(get_job_store),
+    _: None = Depends(enforce_research_rate_limit),
 ) -> ResearchAcceptedResponse:
     from app.middleware.request_id import request_id_context
     req_id = request_id_context.get()

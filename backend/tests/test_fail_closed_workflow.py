@@ -56,3 +56,24 @@ async def test_tavily_successful_empty_search_is_a_valid_empty_result():
     provider.client = SimpleNamespace(search=AsyncMock(return_value={"results": []}))
 
     assert await provider.search_multiple(["query"]) == []
+
+
+
+@pytest.mark.asyncio
+async def test_research_submission_rate_limit_uses_redis_counter(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+    from fastapi import HTTPException
+    from app.core import rate_limit
+
+    fake_redis = Mock()
+    fake_redis.eval = AsyncMock(return_value=11)
+    fake_redis.close = AsyncMock()
+    monkeypatch.setattr(rate_limit.redis, "from_url", Mock(return_value=fake_redis))
+    request = SimpleNamespace(client=SimpleNamespace(host="203.0.113.10"))
+
+    with pytest.raises(HTTPException) as error:
+        await rate_limit.enforce_research_rate_limit(request)
+
+    assert error.value.status_code == 429
+    assert error.value.headers["Retry-After"] == "60"
+    fake_redis.close.assert_awaited_once()

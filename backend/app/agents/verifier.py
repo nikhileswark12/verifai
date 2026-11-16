@@ -141,20 +141,18 @@ class Verifier:
                 tasks.append(self._verify_claim(claim, evidence_list, system_prompt))
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            failures = [
+                (claim.id, result)
+                for claim, result in zip(claims, results)
+                if isinstance(result, Exception)
+            ]
+            if failures:
+                details = "; ".join(f"{claim_id}: {error}" for claim_id, error in failures)
+                raise RuntimeError(
+                    f"Verification failed for one or more claims: {details}"
+                ) from failures[0][1]
 
-            for claim, result in zip(claims, results):
-                if isinstance(result, Exception):
-                    if isinstance(result, (ValidationError, ValueError, TypeError, json.JSONDecodeError)):
-                        raise result
-                    
-                    state.logs.append(
-                        AgentLog(
-                            agent=AgentName.VERIFICATION,
-                            message=f"Verification failed for claim '{claim.id}': {result}",
-                        )
-                    )
-                else:
-                    state.verification_results.append(result)
+            state.verification_results.extend(results)
 
             state.agent_status[AgentName.VERIFICATION] = AgentStatus.DONE
             state.logs.append(AgentLog(agent=AgentName.VERIFICATION, message="RUNNING -> DONE"))

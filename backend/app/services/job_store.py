@@ -120,39 +120,68 @@ class JobStore:
 
     async def recover_stale_jobs(self, stale_threshold_seconds: int) -> List[str]:
         from sqlalchemy import text
-        stmt = text("""
-            UPDATE research_jobs
-            SET status = 'PENDING',
-                worker_id = NULL,
-                heartbeat_at = NULL,
-                updated_at = NOW(),
-                agent_status = jsonb_set(
-                    jsonb_set(
-                        jsonb_set(
-                            jsonb_set(
-                                jsonb_set(
-                                    jsonb_set(agent_status, '{orchestrator}', '"pending"'),
-                                    '{planner}', '"pending"'
-                                ),
-                                '{research}', '"pending"'
-                            ),
-                            '{verification}', '"pending"'
-                        ),
-                        '{contradiction}', '"pending"'
-                    ),
-                    '{report}', '"pending"'
+
+        threshold = max(1, int(stale_threshold_seconds))
+        result = await self.session.execute(
+            text("""
+                SELECT id
+                FROM research_jobs
+                WHERE (status = 'RUNNING'
+                       AND heartbeat_at < NOW() - make_interval(secs => :stale_seconds))
+                   OR (status = 'PENDING'
+                       AND updated_at < NOW() - make_interval(secs => :stale_seconds))
+                FOR UPDATE SKIP LOCKED
+            """),
+            {"stale_seconds": threshold},
+        )
+        recovered_ids = [row[0] for row in result.fetchall()]
+
+        for job_id in recovered_ids:
+            for table in (
+                "verification_results",
+                "contradictions",
+                "evidence",
+                "research_reports",
+                "sub_claims",
+            ):
+                await self.session.execute(
+                    text(f"DELETE FROM {table} WHERE job_id = :job_id"),
+                    {"job_id": job_id},
                 )
-            WHERE (status = 'RUNNING'
-                   AND heartbeat_at < NOW() - make_interval(secs => :stale_seconds))
-               OR (status = 'PENDING'
-                   AND updated_at < NOW() - make_interval(secs => :stale_seconds))
-            RETURNING id
-        """)
-        result = await self.session.execute(stmt, {"stale_seconds": max(1, int(stale_threshold_seconds))})
-        recovered_ids = [str(row[0]) for row in result.fetchall()]
+
+            await self.session.execute(
+                text("""
+                    UPDATE research_jobs
+                    SET status = 'PENDING',
+                        worker_id = NULL,
+                        heartbeat_at = NULL,
+                        updated_at = NOW(),
+                        overall_confidence = NULL,
+                        error_detail = NULL,
+                        claims = '[]'::jsonb,
+                        logs = '[]'::jsonb,
+                        agent_status = jsonb_build_object(
+                            'orchestrator', 'pending',
+                            'planner', 'pending',
+                            'research', 'pending',
+                            'verification', 'pending',
+                            'contradiction', 'pending',
+                            'report', 'pending'
+                        ),
+                        meta_data = jsonb_set(
+                            COALESCE(meta_data, '{}'::jsonb),
+                            '{execution}',
+                            jsonb_build_object('status', 'pending', 'retry_count', 0),
+                            true
+                        )
+                    WHERE id = :job_id
+                """),
+                {"job_id": job_id},
+            )
+
         if recovered_ids:
             await self.session.commit()
-        return recovered_ids
+        return [str(job_id) for job_id in recovered_ids]
 
     async def update(self, state: ResearchState, worker_id: Optional[str] = None) -> None:
         from app.services.exceptions import JobOwnershipLostError
@@ -245,6 +274,7 @@ class JobStore:
             if not db_job.report:
                 db_job.report = DBResearchReport(job_id=db_job.id)
             db_job.report.executive_summary = state.report.executive_summary
+            db_job.report.overall_assessment = state.report.overall_assessment
             db_job.report.conclusion = state.report.conclusion
             db_job.report.generated_at = state.report.generated_at
 
@@ -365,6 +395,7 @@ class JobStore:
                 id=str(db_job.report.id),
                 query=db_job.query,
                 executive_summary=db_job.report.executive_summary,
+                overall_assessment=db_job.report.overall_assessment,
                 claims=claims,
                 overall_confidence=db_job.overall_confidence or 0.0,
                 conclusion=db_job.report.conclusion,

@@ -398,3 +398,39 @@ async def test_health_endpoint_reports_dependency_status():
     payload = json.loads(response.body)
     assert payload["status"] == "degraded"
     assert payload["services"]["database"] == "unavailable"
+
+
+def test_database_state_reconstruction_preserves_report_assessment():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app.services.job_store import JobStore
+
+    generated_at = datetime.now(timezone.utc)
+    db_job = SimpleNamespace(
+        id=uuid4(),
+        query="Assessment persistence",
+        created_at=generated_at,
+        sub_claims=[],
+        evidence=[],
+        verification_results=[],
+        contradictions=[],
+        claims=[],
+        report=SimpleNamespace(
+            id=uuid4(),
+            executive_summary="Summary",
+            overall_assessment="Evidence is mixed.",
+            conclusion="Conclusion",
+            generated_at=generated_at,
+        ),
+        overall_confidence=65.0,
+        agent_status={},
+        logs=[],
+        error_detail=None,
+        meta_data={},
+    )
+
+    state = JobStore(None)._db_to_state(db_job)
+
+    assert state.report is not None
+    assert state.report.overall_assessment == "Evidence is mixed."

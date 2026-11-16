@@ -55,10 +55,7 @@ class Researcher:
     async def _search_claim(self, claim: SubClaim) -> List[Evidence]:
         queries = await expand_query(claim.text, self.llm)
         
-        try:
-            results = await self.search.search_multiple(queries=queries, max_results=5)
-        except Exception:
-            results = []
+        results = await self.search.search_multiple(queries=queries, max_results=5)
 
         evidence_list = []
         for result in results:
@@ -106,21 +103,20 @@ class Researcher:
             tasks = [self._search_claim(claim) for claim in claims]
             results_by_claim = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for claim, results in zip(claims, results_by_claim):
-                if isinstance(results, Exception):
-                    from app.services.exceptions import JSONParseError
-                    if isinstance(results, (ValidationError, ValueError, TypeError, json.JSONDecodeError, JSONParseError)):
-                        raise results
-                    
-                    state.logs.append(
-                        AgentLog(
-                            agent=AgentName.RESEARCH,
-                            message=f"Search failed for claim '{claim.id}': {results}",
-                        )
-                    )
-                    state.evidence_by_claim[claim.id] = []
-                else:
-                    state.evidence_by_claim[claim.id] = results
+            failures = [
+                (claim.id, result)
+                for claim, result in zip(claims, results_by_claim)
+                if isinstance(result, BaseException)
+            ]
+            if failures:
+                details = "; ".join(f"{claim_id}: {error}" for claim_id, error in failures)
+                raise RuntimeError(f"Evidence retrieval failed for one or more claims: {details}") from failures[0][1]
+
+            collected = {
+                claim.id: results
+                for claim, results in zip(claims, results_by_claim)
+            }
+            state.evidence_by_claim.update(collected)
 
             state.agent_status[AgentName.RESEARCH] = AgentStatus.DONE
             state.logs.append(AgentLog(agent=AgentName.RESEARCH, message="RUNNING -> DONE"))

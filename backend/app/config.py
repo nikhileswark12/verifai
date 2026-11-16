@@ -4,9 +4,9 @@ VerifAI — Application Configuration
 Loads environment variables (from .env locally, or the host environment in
 production) and exposes them as a typed Settings singleton.
 
-IMPORTANT: Do NOT add default values for secrets (OPENROUTER_API_KEY,
-TAVILY_API_KEY). Missing secrets raise a clear error at startup rather than
-failing silently mid-request.
+Provider credentials are read at import time but validated when a provider is
+constructed, so scheduler processes can import shared application modules
+without needing to initialize external providers.
 """
 
 import os
@@ -16,16 +16,6 @@ from dotenv import load_dotenv
 # environment is pre-populated; load_dotenv() is a no-op if no file exists.
 load_dotenv()
 
-
-def _require(name: str) -> str:
-    """Return env var value or raise a descriptive error if missing."""
-    value = os.getenv(name, "")
-    if not value:
-        raise EnvironmentError(
-            f"Required environment variable '{name}' is not set. "
-            "Set it in your .env file (local) or container environment (production)."
-        )
-    return value
 
 
 class Settings:
